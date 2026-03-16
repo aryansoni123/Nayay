@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import argparse
 import hashlib
 import json
@@ -82,6 +82,7 @@ class EvidenceAnalyzer:
         quality_flags = self._quality_flags(backend_text_en, extraction_meta)
         evidence_strength = self._score_evidence_strength(evidence_types, quality_flags)
 
+        entity_label = self._entity_label(entities, file_obj)
         result = {
             "evidence_id": evidence_id,
             "status": "processed",
@@ -90,10 +91,11 @@ class EvidenceAnalyzer:
                 "file_path": str(file_obj),
                 "file_extension": file_obj.suffix.lower(),
                 "file_size_bytes": file_obj.stat().st_size,
-                "processed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "processed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "source_language": source_language,
                 "backend_language": self.config.default_language,
                 "query_context": query_context,
+                "entity_label": entity_label,
             },
             "evidence_context": {
                 "evidence_summary": summary,
@@ -219,13 +221,51 @@ class EvidenceAnalyzer:
         transaction_ids = re.findall(r"\b(?:UTR|Txn|Transaction|Ref|Reference)[:\s-]*([A-Za-z0-9-]{6,})\b", text, flags=re.IGNORECASE)
         emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
         phones = re.findall(r"\b(?:\+91[-\s]?)?[6-9]\d{9}\b", text)
+        upi_handles = re.findall(r"\b[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}\b", text)
+
+        generic_terms = {
+            "PAYMENT", "SUCCESSFUL", "RECEIPT", "DETAILS", "DONE", "SPLIT", "EXPENSE",
+            "VIEW", "MARCH", "PM", "AM", "UPI", "BANK", "WHATSAPP", "IMAGE", "CONTACT",
+            "SUPPORT", "POWERED", "RECEIVED", "TRANSACTION", "TRANSFER", "HISTORY", "SHARE",
+            "BALANCE", "CHECK", "CREDITED", "BANKING", "NAME", "PHONEPE", "MONEY", "SEND",
+            "UTR", "PA", "LIA", "LAI"
+        }
+        raw_candidates = re.findall(r"\b[A-Z][A-Z]{2,}(?:\s+[A-Z][A-Z]{2,})*\b", text)
+        raw_candidates += re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b", text)
+
+        names: List[str] = []
+        for candidate in raw_candidates:
+            cleaned = re.sub(r"\s+", " ", candidate).strip()
+            if any(char.isdigit() for char in cleaned):
+                continue
+            parts = cleaned.split()
+            if not parts:
+                continue
+            if any(part.upper() in generic_terms for part in parts):
+                if not all(part.upper() not in generic_terms for part in parts):
+                    continue
+            if len(parts) > 4 or len(cleaned) < 3:
+                continue
+            names.append(cleaned)
+
+        prioritized_names = sorted(
+            set(names),
+            key=lambda value: (
+                -sum(1 for part in value.split() if part[:1].isalpha()),
+                any(part.isupper() for part in value.split()),
+                -len(value),
+                value,
+            ),
+        )
 
         return {
+            "names": prioritized_names,
             "dates": sorted(set(dates)),
             "money": sorted(set(amounts)),
             "transaction_ids": sorted(set(transaction_ids)),
             "emails": sorted(set(emails)),
             "phones": sorted(set(phones)),
+            "upi_handles": sorted(set(upi_handles)),
         }
 
     def _extract_timeline(self, text: str) -> List[Dict[str, str]]:
@@ -335,7 +375,7 @@ class EvidenceAnalyzer:
 
     @staticmethod
     def _evidence_id(file_obj: Path) -> str:
-        raw = f"{file_obj.name}:{file_obj.stat().st_mtime if file_obj.exists() else datetime.now(UTC).timestamp()}"
+        raw = f"{file_obj.name}:{file_obj.stat().st_mtime if file_obj.exists() else datetime.now(timezone.utc).timestamp()}"
         return "ev-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
 
     @staticmethod
@@ -348,6 +388,20 @@ class EvidenceAnalyzer:
         if extraction_meta.get("error"):
             flags.append("extractor_warning")
         return flags
+
+    @staticmethod
+    def _entity_label(entities: Dict[str, List[str]], file_obj: Path) -> str:
+        names = entities.get("names", [])
+        preferred_name = None
+        for name in names:
+            words = name.split()
+            if 1 <= len(words) <= 4 and all(word[:1].isalpha() for word in words):
+                preferred_name = name
+                break
+
+        base_name = preferred_name or file_obj.stem
+        sanitized = re.sub(r"[^A-Za-z0-9_-]+", "_", base_name).strip("_")
+        return sanitized or "unknown_entity"
 
     def _unprocessable_result(
         self,
@@ -363,7 +417,7 @@ class EvidenceAnalyzer:
                 "file_name": file_path.name,
                 "file_path": str(file_path),
                 "file_extension": file_path.suffix.lower(),
-                "processed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "processed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             },
             "evidence_context": {
                 "evidence_summary": "",
@@ -380,7 +434,8 @@ class EvidenceAnalyzer:
         }
 
     def _write_output(self, result: Dict) -> str:
-        out_path = Path(self.config.output_dir) / f"{result['evidence_id']}.json"
+        entity_label = result.get("metadata", {}).get("entity_label", "unknown_entity")
+        out_path = Path(self.config.output_dir) / f"{entity_label}_{result['evidence_id']}.json"
         with out_path.open("w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         return str(out_path)
