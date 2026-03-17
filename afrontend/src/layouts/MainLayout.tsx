@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -9,6 +9,7 @@ import {
   Layers, Search
 } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
+import Lenis from 'lenis';
 
 export const MainLayout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -17,10 +18,36 @@ export const MainLayout: React.FC = () => {
   const [activeDialog, setActiveDialog] = useState<'evidence' | 'laws' | 'meter' | 'knowledge' | null>(null);
   const [kbSearch, setKbSearch] = useState('');
   const navigate = useNavigate();
+  const kbScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
   }, [isDarkMode]);
+
+  useEffect(() => {
+    let lenis: Lenis | null = null;
+    let rafId: number;
+
+    if (activeDialog === 'knowledge' && kbScrollRef.current) {
+      lenis = new Lenis({
+        wrapper: kbScrollRef.current,
+        content: kbScrollRef.current.firstElementChild as HTMLElement,
+        duration: 1.2,
+        smoothWheel: true,
+      });
+
+      const raf = (time: number) => {
+        lenis?.raf(time);
+        rafId = requestAnimationFrame(raf);
+      };
+      rafId = requestAnimationFrame(raf);
+    }
+
+    return () => {
+      lenis?.destroy();
+      cancelAnimationFrame(rafId);
+    };
+  }, [activeDialog]);
 
   const handleGoogleLogin = useGoogleLogin({
     onSuccess: (tokenResponse) => console.log("Login Success:", tokenResponse),
@@ -68,7 +95,7 @@ export const MainLayout: React.FC = () => {
             <div className="w-8 h-8 bg-[var(--text-primary)] rounded-lg flex items-center justify-center">
               <ShieldCheck size={20} className="text-[var(--bg-color)]" />
             </div>
-            <span className="font-black text-lg tracking-tighter hidden sm:block uppercase">Themis AI</span>
+            <span className="font-black text-lg tracking-tighter hidden sm:block uppercase text-[var(--text-primary)]">Themis AI</span>
           </div>
         </div>
 
@@ -98,11 +125,14 @@ export const MainLayout: React.FC = () => {
         <AnimatePresence>
           {isSidebarOpen && (
             <>
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={toggleSidebar} className="absolute inset-0 bg-black/40 backdrop-blur-sm z-40" />
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={toggleSidebar} className="absolute inset-0 bg-[var(--glass-overlay)] backdrop-blur-sm z-40" />
               <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 35, stiffness: 200 }} className="absolute left-0 top-0 bottom-0 w-[85vw] max-w-[320px] bg-[var(--bg-color)] border-r border-[var(--glass-border)] z-50 flex flex-col p-6 space-y-8 shadow-2xl">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-[0.4em] text-[var(--text-secondary)]">Enterprise Suite</span>
-                  <button onClick={toggleSidebar} className="p-2 hover:bg-black/5 rounded-full"><X size={20} /></button>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={18} className="text-[var(--text-primary)]" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.4em] text-[var(--text-secondary)]">Enterprise</span>
+                  </div>
+                  <button onClick={toggleSidebar} className="p-2 hover:bg-[var(--glass-bg)] rounded-full transition-colors"><X size={20} /></button>
                 </div>
 
                 <button onClick={() => { navigate('/'); toggleSidebar(); }} className="w-full flex items-center justify-center gap-3 py-4 bg-[var(--text-primary)] text-[var(--bg-color)] rounded-2xl font-black text-xs hover:scale-[0.98] transition-all"><Plus size={18} /> NEW SESSION</button>
@@ -149,60 +179,60 @@ export const MainLayout: React.FC = () => {
         {activeDialog && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setActiveDialog(null)} className="absolute inset-0 bg-[var(--glass-overlay)] backdrop-blur-md" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className={`relative w-full max-w-xl glass rounded-[40px] overflow-hidden border border-[var(--glass-border)] shadow-2xl transition-colors duration-300 flex flex-col`}>
-              <div className="p-6 sm:p-8 border-b border-[var(--glass-border)] flex items-center justify-between bg-[var(--text-primary)]/[0.02] flex-shrink-0">
-                <h2 className="text-[10px] font-black uppercase tracking-[0.4em] text-[var(--text-secondary)]">
-                  {activeDialog === 'evidence' ? 'Evidence Vault' : activeDialog === 'laws' ? 'Statutes' : activeDialog === 'meter' ? 'Legal Position' : 'Knowledge Intelligence'}
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className={`relative w-full max-w-lg max-h-[85vh] glass rounded-[32px] overflow-hidden border border-[var(--glass-border)] shadow-2xl transition-colors duration-300 flex flex-col mx-4 sm:mx-0`}>
+              <div className="p-5 sm:p-6 border-b border-[var(--glass-border)] flex items-center justify-between bg-[var(--text-primary)]/[0.02] flex-shrink-0">
+                <h2 className="text-[9px] font-black uppercase tracking-[0.4em] text-[var(--text-secondary)]">
+                  {activeDialog === 'evidence' ? 'Evidence Vault' : activeDialog === 'laws' ? 'Statutes' : activeDialog === 'meter' ? 'Legal Position' : 'Intelligence Base'}
                 </h2>
-                <button onClick={() => setActiveDialog(null)} className="p-2 hover:bg-black/5 rounded-full"><X size={20} /></button>
+                <button onClick={() => setActiveDialog(null)} className="p-2 hover:bg-[var(--glass-bg)] rounded-full transition-colors"><X size={18} /></button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 sm:p-8 custom-scrollbar min-h-0">
+              <div className="flex-1 overflow-y-auto p-5 sm:p-6 custom-scrollbar min-h-0">
                 {activeDialog === 'evidence' && (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {evidenceList.map((item, i) => (
-                      <div key={i} className="flex items-center gap-4 sm:gap-6 p-4 sm:p-5 bg-[var(--glass-bg)] rounded-3xl border border-[var(--glass-border)]">
-                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[var(--text-primary)]/10 rounded-2xl flex items-center justify-center flex-shrink-0"><FileText size={18} /></div>
+                      <div key={i} className="flex items-center gap-4 p-4 bg-[var(--glass-bg)] rounded-2xl border border-[var(--glass-border)]">
+                        <div className="w-9 h-9 bg-[var(--text-primary)]/10 rounded-xl flex items-center justify-center flex-shrink-0"><FileText size={16} /></div>
                         <div className="flex-1 marquee-container min-w-0">
-                          <div className="marquee-content font-bold text-xs sm:text-sm tracking-tight">{item.name}</div>
+                          <div className="marquee-content font-bold text-xs tracking-tight text-[var(--text-primary)]">{item.name}</div>
                         </div>
-                        <button className="p-3 hover:bg-[var(--text-primary)] hover:text-[var(--bg-color)] rounded-xl transition-all border border-[var(--glass-border)] flex-shrink-0"><Eye size={16} /></button>
+                        <button className="p-2.5 hover:bg-[var(--text-primary)] hover:text-[var(--bg-color)] rounded-lg transition-all border border-[var(--glass-border)] flex-shrink-0"><Eye size={14} /></button>
                       </div>
                     ))}
                   </div>
                 )}
 
                 {activeDialog === 'knowledge' && (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4 auto-rows-fr">
+                  <div className="space-y-5 h-full flex flex-col">
+                    <div className="grid grid-cols-2 gap-3 flex-shrink-0">
                       {[
                         { label: 'Vectors', val: '1.2M+', icon: <Layers size={14} /> },
                         { label: 'Sources', val: kbFiles.length, icon: <FileText size={14} /> },
-                        { label: 'Storage', val: '12.4 GB', icon: <HardDrive size={14} /> },
+                        { label: 'Storage', val: '12.4GB', icon: <HardDrive size={14} /> },
                         { label: 'Uptime', val: '99.9%', icon: <Database size={14} /> }
                       ].map((s, i) => (
-                        <div key={i} className="p-5 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-[32px] flex flex-col items-center text-center justify-center space-y-2">
-                          <div className="text-[var(--text-primary)] opacity-60">{s.icon}</div>
-                          <div className="text-[9px] font-black uppercase tracking-widest text-[var(--text-secondary)]">{s.label}</div>
-                          <div className="text-sm font-black tracking-tight">{s.val}</div>
+                        <div key={i} className="p-4 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl flex flex-col items-center text-center justify-center space-y-1.5">
+                          <div className="text-[var(--text-primary)] opacity-40">{s.icon}</div>
+                          <div className="text-[8px] font-black uppercase tracking-widest text-[var(--text-secondary)]">{s.label}</div>
+                          <div className="text-xs font-black tracking-tight text-[var(--text-primary)]">{s.val}</div>
                         </div>
                       ))}
                     </div>
 
-                    <div className="space-y-4">
-                      <div className="relative">
+                    <div className="space-y-3 flex-1 flex flex-col min-h-0">
+                      <div className="relative flex-shrink-0">
                         <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
-                        <input value={kbSearch} onChange={(e) => setKbSearch(e.target.value)} placeholder="Search Statutes..." className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl py-3.5 pl-10 pr-4 text-xs font-bold placeholder:text-[var(--text-secondary)]/50" />
+                        <input value={kbSearch} onChange={(e) => setKbSearch(e.target.value)} placeholder="Search Statutes..." className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl py-3 pl-10 pr-4 text-[11px] font-bold placeholder:text-[var(--text-secondary)]/40 text-[var(--text-primary)]" />
                       </div>
 
-                      <div className="space-y-3">
+                      <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                         {filteredKbFiles.map((f, i) => (
-                          <div key={i} className="flex items-center gap-4 p-4 bg-[var(--glass-bg)] rounded-3xl border border-[var(--glass-border)] group">
-                            <div className="w-10 h-10 bg-[var(--text-primary)]/10 rounded-2xl flex items-center justify-center flex-shrink-0"><FileText size={16} /></div>
+                          <div key={i} className="flex items-center gap-3 p-3.5 bg-[var(--glass-bg)] rounded-2xl border border-[var(--glass-border)] group">
+                            <div className="w-8 h-8 bg-[var(--text-primary)]/10 rounded-lg flex items-center justify-center flex-shrink-0"><FileText size={14} /></div>
                             <div className="flex-1 marquee-container min-w-0">
-                              <div className="marquee-content font-bold text-[11px] tracking-tight">{f}</div>
+                              <div className="marquee-content font-bold text-[10px] tracking-tight text-[var(--text-primary)]">{f}</div>
                             </div>
-                            <button className="p-2.5 hover:bg-[var(--text-primary)] hover:text-[var(--bg-color)] rounded-xl transition-all border border-[var(--glass-border)] flex-shrink-0"><Download size={14} /></button>
+                            <button className="p-2 hover:bg-[var(--text-primary)] hover:text-[var(--bg-color)] rounded-lg transition-all border border-[var(--glass-border)] flex-shrink-0"><Download size={14} /></button>
                           </div>
                         ))}
                       </div>

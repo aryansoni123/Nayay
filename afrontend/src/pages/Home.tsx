@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Plus, User, CheckCircle, ShieldCheck, ShieldAlert, Lock, Fingerprint } from 'lucide-react';
+import { Send, Mic, Plus, User, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -75,7 +75,7 @@ export const Home: React.FC = () => {
               <div className="flex gap-6 items-start w-full">
                 {/* Minimalist Dot Avatar */}
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-1 ${
-                  msg.role === 'user' ? 'bg-white text-black' : 'bg-white/10 border border-white/10 text-white'
+                  msg.role === 'user' ? 'bg-[var(--text-primary)] text-[var(--bg-color)]' : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-primary)]'
                 }`}>
                   {msg.role === 'user' ? <User size={14} /> : <ShieldCheck size={14} />}
                 </div>
@@ -85,8 +85,8 @@ export const Home: React.FC = () => {
                   <div className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--text-secondary)] opacity-50">
                     {msg.role === 'user' ? 'User' : 'Themis AI'}
                   </div>
-                  <div className={`text-[15px] sm:text-[16px] leading-[1.8] font-medium tracking-tight ${
-                    msg.role === 'user' ? 'text-white' : 'text-white/80'
+                  <div className={`text-[15px] sm:text-[16px] leading-[1.8] font-medium tracking-tight text-[var(--text-primary)] ${
+                    msg.role === 'assistant' ? 'opacity-80' : ''
                   }`}>
                     {msg.content}
                   </div>
