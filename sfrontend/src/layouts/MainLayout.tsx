@@ -19,17 +19,40 @@ export const MainLayout: React.FC = () => {
   const [activeModal, setActiveModal] = useState<'laws' | 'documents' | 'meter' | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
 
-  // --- GOOGLE AUTH FUNCTION ---
+  // 1. Add 'user' to your state variables at the top
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+
+  // 2. Update the handleGoogleLogin function
   const handleGoogleLogin = useGoogleLogin({
-    onSuccess: (tokenResponse) => {
-      // This gets the secure token. Later, we send this to your Python backend!
-      console.log("Google Login Success! Token:", tokenResponse.access_token);
-      alert("Successfully authenticated with Google! (Backend connection pending)");
-    },
-    onError: () => {
-      console.error('Google Login Failed');
+    onSuccess: async (tokenResponse) => {
+      try {
+        const res = await fetch('http://localhost:8000/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: tokenResponse.access_token })
+        });
+
+        const data = await res.json();
+
+        if (data.status === "success") {
+          localStorage.setItem("user_numeric_id", data.user_id);
+
+          // --- NEW: Set the user state here ---
+          setUser({ name: data.name || "User", email: data.email });
+          console.log("✅ Logged in as:", data.email);
+        }
+      } catch (error) {
+        console.error("❌ Login failed:", error);
+      }
     }
   });
+
+  // 3. Create a Logout function
+  const handleLogout = () => {
+    localStorage.removeItem("user_numeric_id");
+    setUser(null);
+    navigate('/');
+  };
 
   // --- THEME EFFECT ---
   useEffect(() => {
@@ -181,15 +204,27 @@ export const MainLayout: React.FC = () => {
           {/* SIDEBAR BOTTOM CONTROLS (Updated) */}
           <div style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
 
-            {/* NEW SIGN IN BUTTON */}
-            <Button
-              variant="primary"
-              onClick={() => handleGoogleLogin()}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: 'none' }}
-            >
-              <LogIn size={20} color="var(--primary-invert)" />
-              Sign In with Google
-            </Button>
+            {user ? (
+              // SHOW SIGN OUT IF LOGGED IN
+              <Button
+                variant="flat"
+                onClick={handleLogout}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: '1.5px solid #ff4d4d', color: '#ff4d4d', background: 'transparent' }}
+              >
+                <X size={20} />
+                Sign Out ({user.name.split(' ')[0]})
+              </Button>
+            ) : (
+              // SHOW SIGN IN IF NOT LOGGED IN
+              <Button
+                variant="primary"
+                onClick={() => handleGoogleLogin()}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+              >
+                <LogIn size={20} color="var(--primary-invert)" />
+                Sign In with Google
+              </Button>
+            )}
 
             {/* EXISTING THEME TOGGLE */}
             <Button variant="flat" onClick={() => setIsDarkMode(!isDarkMode)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', background: 'transparent', boxShadow: 'none', border: '1.5px solid var(--text-secondary)' }}>

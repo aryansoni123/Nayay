@@ -4,11 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Menu, X, MessageSquare, History, MapPin, 
   BookOpen, Plus, FileText, Scale, 
-  ShieldCheck, LogIn, ChevronRight, Activity,
+  ShieldCheck, ChevronRight, Activity,
   Sun, Moon, Eye, Download, Database, HardDrive, 
-  Layers, Search
+  Layers, Search, LogOut, User
 } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
+import { supabase } from '../lib/supabaseClient';
 import Lenis from 'lenis';
 
 export const MainLayout: React.FC = () => {
@@ -17,8 +18,42 @@ export const MainLayout: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [activeDialog, setActiveDialog] = useState<'evidence' | 'laws' | 'meter' | 'knowledge' | null>(null);
   const [kbSearch, setKbSearch] = useState('');
+  const [user, setUser] = useState<{ email: string; name: string } | null>(null);
   const navigate = useNavigate();
   const kbScrollRef = useRef<HTMLDivElement>(null);
+
+  // Check authentication status on mount
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser({
+          email: session.user.email || '',
+          name: session.user.user_metadata?.name || 'User'
+        });
+      } else {
+        const storedEmail = localStorage.getItem('userEmail');
+        if (storedEmail) {
+          setUser({ email: storedEmail, name: 'User' });
+        }
+      }
+    };
+    checkUser();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setUser({
+          email: session.user.email || '',
+          name: session.user.user_metadata?.name || 'User'
+        });
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
+    return () => subscription?.unsubscribe();
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
@@ -49,10 +84,44 @@ export const MainLayout: React.FC = () => {
     };
   }, [activeDialog]);
 
+  // Google Login Handler
   const handleGoogleLogin = useGoogleLogin({
-    onSuccess: (tokenResponse) => console.log("Login Success:", tokenResponse),
-    onError: () => console.log('Login Failed'),
+    onSuccess: async (tokenResponse) => {
+      try {
+        const response = await fetch('http://localhost:8000/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: tokenResponse.access_token })
+        });
+
+        const data = await response.json();
+
+        if (data.status === "success") {
+          localStorage.setItem("user_id", data.user_id);
+          localStorage.setItem("userEmail", data.email);
+          setUser({ name: data.name || "User", email: data.email });
+          console.log("✅ Logged in as:", data.email);
+        }
+      } catch (error) {
+        console.error("❌ Login failed:", error);
+      }
+    },
+    onError: () => console.error('❌ Login Failed'),
   });
+
+  // Logout Handler
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      localStorage.removeItem("user_id");
+      localStorage.removeItem("userEmail");
+      setUser(null);
+      setIsSidebarOpen(false);
+      console.log("👋 Logged out");
+    } catch (error) {
+      console.error("❌ Logout failed:", error);
+    }
+  };
 
   const chatHistory = Array.from({ length: 12 }, (_, i) => ({
     id: i,
@@ -164,7 +233,34 @@ export const MainLayout: React.FC = () => {
                     <button onClick={() => setIsDarkMode(false)} className={`flex-1 flex items-center justify-center py-2.5 rounded-xl transition-all ${!isDarkMode ? 'bg-[var(--text-primary)] text-[var(--bg-color)]' : 'text-[var(--text-secondary)]'}`}><Sun size={14} /></button>
                     <button onClick={() => setIsDarkMode(true)} className={`flex-1 flex items-center justify-center py-2.5 rounded-xl transition-all ${isDarkMode ? 'bg-[var(--text-primary)] text-[var(--bg-color)]' : 'text-[var(--text-secondary)]'}`}><Moon size={14} /></button>
                   </div>
-                  <button onClick={() => handleGoogleLogin()} className="w-full flex items-center justify-center gap-3 p-4 border border-[var(--glass-border)] rounded-2xl hover:bg-[var(--glass-bg)] transition-all"><LogIn size={18} /><span className="text-[10px] font-black uppercase tracking-[0.2em]">Secure Entry</span></button>
+
+                  {/* User Info / Auth Section */}
+                  {user ? (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-[var(--glass-bg)] rounded-2xl border border-[var(--glass-border)]">
+                        <div className="flex items-center gap-2 mb-2">
+                          <User size={14} className="text-[var(--text-primary)]" />
+                          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-secondary)]">Logged In</p>
+                        </div>
+                        <p className="text-[10px] font-bold text-[var(--text-primary)] truncate">{user.email}</p>
+                      </div>
+                      <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center justify-center gap-3 p-4 border border-[var(--glass-border)] rounded-2xl hover:bg-[var(--glass-bg)] transition-all text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      >
+                        <LogOut size={18} />
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sign Out</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleGoogleLogin()}
+                      className="w-full flex items-center justify-center gap-3 p-4 border border-[var(--glass-border)] rounded-2xl hover:bg-[var(--glass-bg)] transition-all text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    >
+                      <ShieldCheck size={18} />
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em]">Secure Login</span>
+                    </button>
+                  )}
                 </div>
               </motion.aside>
             </>
