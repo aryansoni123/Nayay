@@ -154,7 +154,7 @@ export const MainLayout: React.FC = () => {
                   </div>
 
                   <nav className="space-y-2 flex-shrink-0">
-                    <NavLink to="/nearby" onClick={toggleSidebar} className={({isActive}) => `flex items-center gap-4 p-4 rounded-2xl transition-all ${isActive ? 'bg-[var(--glass-bg)] border border-[var(--glass-border)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}><MapPin size={16} /><span className="text-[11px] font-black uppercase tracking-widest">Nearby Grid</span></NavLink>
+                    <NavLink to="/nearby" onClick={toggleSidebar} className={({isActive}) => `flex items-center gap-4 p-4 rounded-2xl transition-all ${isActive ? 'bg-[var(--glass-bg)] border border-[var(--glass-border)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}><MapPin size={16} /><span className="text-[11px] font-black uppercase tracking-widest">Nearby Help</span></NavLink>
                     <button onClick={() => { setActiveDialog('knowledge'); toggleSidebar(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all"><BookOpen size={16} /><span className="text-[11px] font-black uppercase tracking-widest">Intelligence Base</span></button>
                   </nav>
                 </div>

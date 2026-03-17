@@ -40,19 +40,19 @@ export const NearbyHelp: React.FC = () => {
           <button onClick={() => navigate('/')} className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors mb-2"><ArrowLeft size={14} /> Back to Session</button>
           <div className="flex items-center gap-4">
             <div className="p-3 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl shadow-lg"><MapPin size={24} className="text-[var(--text-primary)]" /></div>
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tighter text-[var(--text-primary)] uppercase">Nearby Grid</h1>
+            <h1 className="text-3xl sm:text-4xl font-black tracking-tighter text-[var(--text-primary)] uppercase">Nearby Help</h1>
           </div>
           <p className="text-[var(--text-secondary)] text-xs font-bold max-w-sm leading-relaxed uppercase tracking-wider opacity-60">
             Emergency verification and contact points.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-row items-center justify-center gap-3 w-full sm:w-auto">
           {[
             { label: 'Law Firms', icon: <Scale size={16} />, count: '12 Found' },
             { label: 'Stations', icon: <ShieldAlert size={16} />, count: '4 Found' }
           ].map((cat, i) => (
-            <div key={i} className="glass flex items-center gap-4 px-5 py-3 rounded-2xl border border-[var(--glass-border)] shadow-sm">
+            <div key={i} className="glass flex items-center gap-4 px-5 py-3 rounded-2xl border border-[var(--glass-border)] shadow-sm min-w-[140px]">
               <span className="text-[var(--text-primary)]">{cat.icon}</span>
               <div className="text-left">
                 <div className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-widest">{cat.label}</div>
