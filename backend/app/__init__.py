@@ -1,0 +1,1 @@
+"""Nayay backend application package."""

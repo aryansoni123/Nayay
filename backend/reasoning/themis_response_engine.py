@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ class ThemisRequest:
     lang: str  # original input language: "hi" or "en"
     case_type: Optional[str] = None
     evidence: Optional[str] = None
+    evidence_json: Optional[str] = None
     top_k: int = 5
     pro_mode: bool = True
 
@@ -99,9 +101,49 @@ def _build_evidence_context(evidence: Optional[str], case_type: Optional[str]) -
         "evidence_context": {
             "evidence_summary": evidence or "",
             "entities": {},
+            "timeline": [],
             "evidence_types": [case_type] if case_type else [],
+            "relevance_score": 0.0,
+            "evidence_strength": 0.0,
+            "quality_flags": [],
         }
     }
+
+
+def _load_evidence_json(path: Optional[str]) -> Optional[dict]:
+    if not path:
+        return None
+    file_path = Path(path)
+    if not file_path.exists() or not file_path.is_file():
+        return None
+    try:
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        return None
+    return None
+
+
+def _merge_evidence_context(
+    base_context: Optional[dict],
+    analyzer_payload: Optional[dict],
+) -> Optional[dict]:
+    if not analyzer_payload:
+        return base_context
+
+    extracted = analyzer_payload.get("evidence_context", {}) if isinstance(analyzer_payload, dict) else {}
+    if not extracted:
+        return base_context
+
+    if not base_context:
+        return {"evidence_context": extracted}
+
+    merged = dict(base_context.get("evidence_context", {}))
+    for key, value in extracted.items():
+        if value not in (None, "", [], {}):
+            merged[key] = value
+    return {"evidence_context": merged}
 
 
 def _truncate_references(references: List[dict], top_k: int) -> List[dict]:
@@ -126,6 +168,126 @@ def _estimate_strength(references: List[dict]) -> float:
     avg = max(0.0, min(1.0, avg))
     # Blend with a small floor so low-signal cases still produce usable guidance.
     return round((avg * 85.0) + 10.0, 1)
+
+
+def _squash_score(raw: float, gain: float = 2500.0) -> float:
+    """Convert tiny reranker scores to 0..1 with a smooth logistic curve."""
+    raw = max(0.0, float(raw))
+    return 1.0 - math.exp(-raw * gain)
+
+
+def _compute_legal_meter(
+    references: List[dict],
+    query: str,
+    case_type: Optional[str],
+    evidence_context: Optional[dict],
+) -> Dict[str, Any]:
+    """
+    Implements documented formula:
+
+    score = 0.3 * evidence_strength
+          + 0.25 * law_match
+          + 0.2 * documentation
+          + 0.15 * timeline_validity
+          + 0.1 * case_similarity
+
+    All sub-scores are normalized to 0..1.
+    Final user_strength/opponent_strength are percentages summing to 100.
+    """
+    ev = (evidence_context or {}).get("evidence_context", {}) if evidence_context else {}
+
+    # 1) evidence_strength from analyzer, fallback by reference availability.
+    evidence_strength = ev.get("evidence_strength")
+    if isinstance(evidence_strength, (int, float)):
+        evidence_strength = max(0.0, min(1.0, float(evidence_strength)))
+    else:
+        evidence_strength = 0.25 if references else 0.1
+
+    # 2) law_match from retrieval relevance (squashed reranker signal + coverage).
+    scores = [float(r.get("score", 0.0)) for r in references if isinstance(r.get("score", 0.0), (int, float))]
+    if scores:
+        avg_score = sum(scores) / len(scores)
+        score_signal = _squash_score(avg_score)
+        coverage_signal = min(1.0, len(references) / 5.0)
+        law_match = max(0.0, min(1.0, 0.7 * score_signal + 0.3 * coverage_signal))
+    else:
+        law_match = 0.0
+
+    # 3) documentation quality from entities and quality flags.
+    entities = ev.get("entities", {}) if isinstance(ev.get("entities"), dict) else {}
+    quality_flags = ev.get("quality_flags", []) if isinstance(ev.get("quality_flags"), list) else []
+    entity_count = 0
+    for value in entities.values():
+        if isinstance(value, list):
+            entity_count += len(value)
+
+    doc_base = min(1.0, entity_count / 12.0)
+    penalty = 0.0
+    if "too_short" in quality_flags:
+        penalty += 0.2
+    if "low_context" in quality_flags:
+        penalty += 0.2
+    if "extractor_warning" in quality_flags:
+        penalty += 0.15
+    documentation = max(0.0, min(1.0, doc_base - penalty))
+
+    # 4) timeline_validity from timeline extraction quality.
+    timeline = ev.get("timeline", []) if isinstance(ev.get("timeline"), list) else []
+    if timeline:
+        valid_dates = 0
+        for item in timeline:
+            if isinstance(item, dict) and item.get("date") and item.get("event"):
+                valid_dates += 1
+        ratio = valid_dates / len(timeline)
+        timeline_validity = max(0.0, min(1.0, 0.5 * ratio + 0.5 * min(1.0, len(timeline) / 4.0)))
+    else:
+        timeline_validity = 0.25
+
+    # 5) case_similarity from case type overlap in query/evidence types.
+    case_similarity = 0.4
+    evidence_types = ev.get("evidence_types", []) if isinstance(ev.get("evidence_types"), list) else []
+    if case_type:
+        ct = case_type.lower().strip()
+        q = query.lower()
+        if ct in q:
+            case_similarity += 0.3
+        if any(ct in str(t).lower() for t in evidence_types):
+            case_similarity += 0.3
+    case_similarity = max(0.0, min(1.0, case_similarity))
+
+    meter_score = (
+        0.3 * evidence_strength
+        + 0.25 * law_match
+        + 0.2 * documentation
+        + 0.15 * timeline_validity
+        + 0.1 * case_similarity
+    )
+
+    user_strength = round(max(0.0, min(100.0, meter_score * 100.0)), 1)
+    opponent_strength = round(100.0 - user_strength, 1)
+
+    return {
+        "formula": {
+            "expression": "0.3*evidence_strength + 0.25*law_match + 0.2*documentation + 0.15*timeline_validity + 0.1*case_similarity",
+            "weights": {
+                "evidence_strength": 0.30,
+                "law_match": 0.25,
+                "documentation": 0.20,
+                "timeline_validity": 0.15,
+                "case_similarity": 0.10,
+            },
+        },
+        "components": {
+            "evidence_strength": round(evidence_strength, 3),
+            "law_match": round(law_match, 3),
+            "documentation": round(documentation, 3),
+            "timeline_validity": round(timeline_validity, 3),
+            "case_similarity": round(case_similarity, 3),
+        },
+        "score": round(meter_score, 3),
+        "user_strength_pct": user_strength,
+        "opponent_strength_pct": opponent_strength,
+    }
 
 
 def _build_context_block(references: List[dict]) -> str:
@@ -234,6 +396,8 @@ def generate_themis_response(req: ThemisRequest) -> Dict[str, Any]:
     _init_parent_rag_db(database)
 
     evidence_context = _build_evidence_context(req.evidence, req.case_type)
+    analyzer_payload = _load_evidence_json(req.evidence_json)
+    evidence_context = _merge_evidence_context(evidence_context, analyzer_payload)
 
     with _cwd(_parent_backend_dir()):
         rag_payload = engine.chatbot(
@@ -244,6 +408,12 @@ def generate_themis_response(req: ThemisRequest) -> Dict[str, Any]:
 
     references = _truncate_references(rag_payload.get("references", []), req.top_k)
     strength = _estimate_strength(references)
+    legal_meter = _compute_legal_meter(
+        references=references,
+        query=req.query,
+        case_type=req.case_type,
+        evidence_context=evidence_context,
+    )
 
     themis_english = _llm_generate_response(
         query=req.query,
@@ -261,6 +431,7 @@ def generate_themis_response(req: ThemisRequest) -> Dict[str, Any]:
             "language": req.lang,
             "case_type": req.case_type,
             "evidence": req.evidence,
+            "evidence_json": req.evidence_json,
             "pro_mode": req.pro_mode,
         },
         "retrieval": {
@@ -271,6 +442,7 @@ def generate_themis_response(req: ThemisRequest) -> Dict[str, Any]:
         },
         "confidence": {
             "estimated_strength": strength,
+            "legal_meter": legal_meter,
         },
         "response": {
             "english": themis_english,
@@ -286,6 +458,11 @@ def parse_args() -> ThemisRequest:
     parser.add_argument("--lang", default="en", choices=["hi", "en"], help="Original user language")
     parser.add_argument("--case-type", default=None, help="Optional case category")
     parser.add_argument("--evidence", default=None, help="Optional evidence summary text")
+    parser.add_argument(
+        "--evidence-json",
+        default=None,
+        help="Optional path to analyzer JSON output containing evidence_context",
+    )
     parser.add_argument("--top-k", type=int, default=5, help="Max retrieved references to use")
     parser.add_argument(
         "--fast",
@@ -299,6 +476,7 @@ def parse_args() -> ThemisRequest:
         lang=args.lang,
         case_type=args.case_type,
         evidence=args.evidence,
+        evidence_json=args.evidence_json,
         top_k=args.top_k,
         pro_mode=not args.fast,
     )
