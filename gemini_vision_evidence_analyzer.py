@@ -10,15 +10,6 @@ import re
 from ollama import chat
 from typing import Dict, List, Optional
 
-
-try:
-    from google import genai
-    from google.genai import types
-except ImportError as exc:  # pragma: no cover
-    raise SystemExit(
-        "google-genai is not installed. Run: pip install google-genai"
-    ) from exc
-
 GEMINI_API = "AIzaSyCRIjGYNUfzHb-we0wonAeePSlRRyQ9Om4"
 DEFAULT_MODEL = "gemini-flash-latest"
 

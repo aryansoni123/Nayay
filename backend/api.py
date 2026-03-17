@@ -1,0 +1,147 @@
+import os
+import threading
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+import database
+import engine
+import watcher
+from config import DEVICE
+
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}}) # Explicitly allow all origins for local dev
+
+# Use robust absolute pathing
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) 
+ROOT_DIR = os.path.dirname(SCRIPT_DIR) 
+DATA_DIR = os.path.join(ROOT_DIR, "Data") 
+ALLOWED_EXTENSIONS = {".pdf"}
+
+def startup_logic():
+    """Initializes the database and starts the file watcher."""
+    print(f"Targeting Data Directory: {DATA_DIR}")
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    
+    print("Initializing Vector Databases...")
+    database.init_dbs(data_dir=DATA_DIR)
+    
+    # Start watcher in background
+    watcher_thread = threading.Thread(
+        target=watcher.start_file_watcher, 
+        args=(DATA_DIR,), 
+        daemon=True
+    )
+    watcher_thread.start()
+    print(f"Background File Watcher Started on: {DATA_DIR}")
+
+@app.route('/chat', methods=['POST'])
+def handle_chat():
+    data = request.json
+    user_query = data.get("query")
+    if not user_query:
+        return jsonify({"error": "No query provided"}), 400
+
+    # Optional: structured evidence dict from EvidenceAnalyzer.analyze_file()
+    evidence_context = data.get("evidence_context")  # dict or None
+    # Flag: True = Pro mode (evidence + confidence), False = Fast mode
+    pro_mode = bool(data.get("pro_mode", False))
+
+    try:
+        result = engine.chatbot(user_query, evidence_context=evidence_context, pro_mode=pro_mode)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/status', methods=['GET'])
+def get_status():
+    indexed_files = database.processed_files
+    disk_files = []
+    if os.path.exists(DATA_DIR):
+        disk_files = [f for f in os.listdir(DATA_DIR) if os.path.isfile(os.path.join(DATA_DIR, f))]
+    
+    print(f"Status Request: Found {len(disk_files)} files on disk.")
+    inventory = []
+    for filename in disk_files:
+        full_path = os.path.join(DATA_DIR, filename)
+        is_indexed = full_path in indexed_files
+        ext = os.path.splitext(filename)[1].lower().replace('.', '')
+        category = 'pdf' if ext == 'pdf' else 'unsupported'
+
+        inventory.append({
+            "id": filename,
+            "name": filename,
+            "full_path": full_path,
+            "type": category,
+            "status": "indexed" if is_indexed else "pending",
+            "vectors": len(indexed_files[full_path]["ids"]) if is_indexed else 0,
+            "size": f"{round(os.path.getsize(full_path) / 1024, 1)} KB"
+        })
+
+    return jsonify({
+        "status": "online",
+        "total_vectors": database.text_db.index.ntotal if database.text_db else 0,
+        "device": str(DEVICE),
+        "inventory": inventory
+    })
+
+@app.route('/delete', methods=['DELETE'])
+def delete_file():
+    data = request.json
+    file_path = data.get("file_path")
+    if not file_path:
+        return jsonify({"error": "No file path provided"}), 400
+    try:
+        database.remove_file_from_db(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return jsonify({"message": f"File {os.path.basename(file_path)} purged successfully."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    # Handle both single 'file' and multiple 'files' keys
+    uploaded_files = []
+    if 'file' in request.files:
+        uploaded_files.append(request.files['file'])
+    if 'files' in request.files:
+        uploaded_files.extend(request.files.getlist('files'))
+    
+    if not uploaded_files:
+        return jsonify({"error": "No files provided"}), 400
+    
+    count = 0
+    rejected_files = []
+    for file in uploaded_files:
+        if file.filename == '':
+            continue
+
+        safe_name = secure_filename(file.filename)
+        if not safe_name:
+            rejected_files.append(file.filename)
+            continue
+
+        ext = os.path.splitext(safe_name)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            rejected_files.append(file.filename)
+            continue
+
+        file_path = os.path.join(DATA_DIR, safe_name)
+        file.save(file_path)
+        count += 1
+
+    if count == 0:
+        return jsonify({
+            "error": "Only PDF files are allowed.",
+            "rejected_files": rejected_files
+        }), 400
+
+    return jsonify({
+        "message": f"Successfully uploaded {count} PDF file(s) for indexing.",
+        "rejected_files": rejected_files
+    }), 201
+
+if __name__ == '__main__':
+    startup_logic()
+    app.run(host='0.0.0.0', port=8000, debug=False)

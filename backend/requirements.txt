@@ -1,0 +1,12 @@
+faiss-cpu
+langchain
+langchain-community
+langchain-huggingface
+langchain-google-genai
+watchdog
+pymupdf
+flashrank
+flask
+flask-cors
+python-dotenv
+sentence-transformers
